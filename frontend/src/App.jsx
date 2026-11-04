@@ -1,7 +1,12 @@
 import { useEffect, useRef, useState } from "react";
 import "./App.css";
-
-const API_BASE_URL = "http://127.0.0.1:8000";
+import ModelDownloads from "./ModelDownloads";
+import {
+  API_BASE_URL,
+  checkApiHealth,
+  downloadImage,
+  generateImage,
+} from "./services/imageApi";
 
 const examples = [
   {
@@ -111,26 +116,6 @@ function Icon({ name, size = 18 }) {
   );
 }
 
-async function getResponseError(response) {
-  const body = await response.text();
-  if (body) {
-    try {
-      const payload = JSON.parse(body);
-      if (typeof payload.detail === "string") return payload.detail;
-      if (Array.isArray(payload.detail)) {
-        return payload.detail
-          .map((item) => item.msg)
-          .filter(Boolean)
-          .join(" ");
-      }
-      return JSON.stringify(payload);
-    } catch {
-      return body;
-    }
-  }
-  return `Request failed with HTTP ${response.status}.`;
-}
-
 export default function App() {
   const [page, setPage] = useState("generate");
   const [mode, setMode] = useState("text");
@@ -138,7 +123,7 @@ export default function App() {
   const [ratio, setRatio] = useState("1:1");
   const [style, setStyle] = useState("None");
   const [advanced, setAdvanced] = useState(false);
-  const [steps, setSteps] = useState(8);
+  const [steps, setSteps] = useState(50);
   const [seed, setSeed] = useState("");
   const [sourceFile, setSourceFile] = useState(null);
   const [sourcePreview, setSourcePreview] = useState("");
@@ -146,9 +131,11 @@ export default function App() {
   const [isGenerating, setIsGenerating] = useState(false);
   const [backendState, setBackendState] = useState("checking");
   const generatedUrls = useRef(new Set());
+  const requestInFlight = useRef(false);
   const [errors, setErrors] = useState({});
   const [status, setStatus] = useState("");
   const [statusIsError, setStatusIsError] = useState(false);
+  const [galleryError, setGalleryError] = useState("");
 
   useEffect(() => {
     return () => {
@@ -158,10 +145,8 @@ export default function App() {
 
   useEffect(() => {
     let active = true;
-    fetch(`${API_BASE_URL}/api/health`)
-      .then(async (response) => {
-        if (!response.ok) throw new Error("Health check failed.");
-        const health = await response.json();
+    checkApiHealth()
+      .then((health) => {
         if (active)
           setBackendState(health.model_loaded ? "ready" : "unavailable");
       })
@@ -224,40 +209,26 @@ export default function App() {
 
   function handleGenerate(event) {
     event.preventDefault();
+    if (requestInFlight.current) return;
     const nextErrors = {};
     if (!prompt.trim()) nextErrors.prompt = "Add a prompt before continuing.";
     if (mode === "image" && !sourceFile)
       nextErrors.image = "Choose a source image for Image to Image.";
+    if (seed !== "" && (!Number.isInteger(Number(seed)) || Number(seed) < 0 || Number(seed) > 4294967295))
+      nextErrors.seed = "Seed must be an integer from 0 to 4294967295.";
     setErrors(nextErrors);
     setStatus("");
     setStatusIsError(false);
     if (Object.keys(nextErrors).length > 0) return;
 
-    const formData = new FormData();
-    formData.append("prompt", prompt.trim());
-    if (mode === "image") formData.append("image", sourceFile, sourceFile.name);
-
+    const request = { prompt: prompt.trim(), mode, image: sourceFile, ratio, style, steps, seed };
+    requestInFlight.current = true;
     setIsGenerating(true);
-    fetch(
-      `${API_BASE_URL}${mode === "image" ? "/api/edit" : "/api/generate"}`,
-      {
-        method: "POST",
-        body: formData,
-      },
-    )
-      .then(async (response) => {
-        if (!response.ok) throw new Error(await getResponseError(response));
-        const contentType = response.headers.get("content-type") || "";
-        if (!contentType.toLowerCase().startsWith("image/")) {
-          throw new Error(
-            "The backend returned success without an image response. Its successful response format is not implemented yet.",
-          );
-        }
-
-        const imageUrl = URL.createObjectURL(await response.blob());
-        generatedUrls.current.add(imageUrl);
+    generateImage(request)
+      .then((imageUrl) => {
+        if (imageUrl.startsWith("blob:")) generatedUrls.current.add(imageUrl);
         setGeneratedImages((current) => [
-          { url: imageUrl, prompt: prompt.trim(), mode },
+          { url: imageUrl, prompt: request.prompt, mode, ratio, style, steps, seed },
           ...current,
         ]);
         setStatus("Image received from the local backend.");
@@ -270,7 +241,10 @@ export default function App() {
         );
         setStatusIsError(true);
       })
-      .finally(() => setIsGenerating(false));
+      .finally(() => {
+        requestInFlight.current = false;
+        setIsGenerating(false);
+      });
   }
 
   return (
@@ -400,7 +374,7 @@ export default function App() {
                   </p>
                   <span className="canvas-disclaimer">
                     {backendState === "unavailable"
-                      ? "Backend connected · Qwen runtime unavailable"
+                      ? "Backend connected · Qwen loads on request if configured"
                       : "Images are generated by your local backend"}
                   </span>
                 </div>
@@ -640,7 +614,7 @@ export default function App() {
                       id="steps"
                       type="range"
                       min="4"
-                      max="20"
+                      max="50"
                       value={steps}
                       onChange={(event) => setSteps(Number(event.target.value))}
                     />
@@ -655,7 +629,8 @@ export default function App() {
                       value={seed}
                       onChange={(event) => setSeed(event.target.value)}
                     />
-                    <p>Settings are for reference in this local interface.</p>
+                    {errors.seed && <p className="field-error" role="alert">{errors.seed}</p>}
+                    <p>Sent to Qwen. Standard models default to 50 steps; no Lightning weights are installed.</p>
                   </div>
                 )}
               </section>
@@ -689,9 +664,12 @@ export default function App() {
                 </span>
               </button>
               <p className="local-note">
-                Prompts and source images go only to your local backend. Other
-                controls are UI-only.
+                Prompts and source images go only to your local backend. The
+                selected settings are sent with every request. First use loads local model weights.
               </p>
+              <button type="button" className="text-button" onClick={() => choosePage("settings")}>
+                Download / manage Qwen models
+              </button>
             </form>
           </aside>
         </>
@@ -704,6 +682,7 @@ export default function App() {
             <h1>Gallery</h1>
             <p>Images created in this workspace will live here.</p>
           </header>
+          {galleryError && <p className="notice notice-error" role="alert">{galleryError}</p>}
           {generatedImages.length === 0 ? (
             <section className="gallery-empty">
               <div className="empty-gallery-icon">
@@ -735,6 +714,26 @@ export default function App() {
                         : "Generated image"}
                     </strong>
                     <p>{image.prompt}</p>
+                    <small className="gallery-details">
+                      Selected: {image.ratio} · {image.style} · {image.steps} steps
+                      {image.seed ? ` · Seed ${image.seed}` : ""}
+                    </small>
+                    <div className="gallery-actions">
+                      <a href={image.url} target="_blank" rel="noreferrer">
+                        Preview
+                      </a>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setGalleryError("");
+                          downloadImage(image.url, `qwen-image-${index + 1}.png`).catch(() =>
+                            setGalleryError("Could not download this image. Try opening the preview instead."),
+                          );
+                        }}
+                      >
+                        Download
+                      </button>
+                    </div>
                   </div>
                 </article>
               ))}
@@ -750,6 +749,7 @@ export default function App() {
             <h1>Settings</h1>
             <p>Adjust the defaults used in your local studio session.</p>
           </header>
+          <ModelDownloads />
           <section className="settings-section">
             <div>
               <span className="canvas-overline">GENERATION DEFAULTS</span>
@@ -792,7 +792,7 @@ export default function App() {
                 id="default-steps"
                 type="range"
                 min="4"
-                max="20"
+                max="50"
                 value={steps}
                 onChange={(event) => setSteps(Number(event.target.value))}
               />
@@ -804,7 +804,7 @@ export default function App() {
                 onClick={() => {
                   setRatio("1:1");
                   setStyle("None");
-                  setSteps(8);
+                  setSteps(50);
                   setSeed("");
                 }}
               >
@@ -817,8 +817,9 @@ export default function App() {
             <div>
               <strong>Private by design</strong>
               <p>
-                Prompts and uploaded images are sent to the local API at
-                127.0.0.1:8000. No external API is configured.
+                Prompts and uploaded images are sent to your configured backend.
+                Model size checks and explicitly approved downloads contact Hugging Face;
+                prompts and source images are not sent there.
               </p>
             </div>
           </section>

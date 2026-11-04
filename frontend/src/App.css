@@ -1116,6 +1116,65 @@ a:focus-visible {
   font-size: 9px;
   line-height: 1.55;
 }
+.gallery-details {
+  display: block;
+  margin-top: 8px;
+  color: #77717e;
+  font: 8px "DM Mono", monospace;
+}
+.model-downloads .notice,
+.model-description,
+.download-confirmation,
+.download-status {
+  font-size: 12px;
+  line-height: 1.65;
+}
+.download-confirmation,
+.download-status {
+  margin-top: 18px;
+  padding: 16px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+  overflow-wrap: anywhere;
+}
+.download-consent {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  color: var(--muted);
+}
+.download-consent input {
+  margin-top: 6px;
+  accent-color: var(--accent);
+}
+.download-status progress {
+  width: 100%;
+  accent-color: var(--accent);
+}
+.model-downloads button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.gallery-actions {
+  display: flex;
+  gap: 12px;
+  margin-top: 10px;
+}
+.gallery-actions a,
+.gallery-actions button {
+  padding: 0;
+  border: 0;
+  color: #c3a9fa;
+  background: transparent;
+  font-size: 9px;
+  text-decoration: none;
+}
+.gallery-actions a:hover,
+.gallery-actions button:hover {
+  color: #eee5ff;
+  text-decoration: underline;
+}
 .text-button {
   display: inline-flex;
   align-items: center;

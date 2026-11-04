@@ -1,0 +1,9 @@
+# Optional heavyweight dependencies. Install ONLY after approval and memory review.
+# Use Python 3.11 or 3.12 for a conservative cross-platform inference environment.
+-r requirements.txt
+torch>=2.6,<3
+diffusers>=0.35,<1
+transformers>=4.51,<5
+accelerate>=1,<2
+safetensors>=0.5,<1
+sentencepiece>=0.2,<1
